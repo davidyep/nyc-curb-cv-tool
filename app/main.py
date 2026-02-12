@@ -91,7 +91,9 @@ async def analyze_image(
     # 7. Bridge to existing rules engine
     observations = zone_analyzer.detections_to_observations(assignments)
     decisions = [
-        rules_engine.evaluate_with_zone(request.frame, obs, assignment.zone)
+        rules_engine.evaluate_with_zone(
+            request.frame, obs, assignment.zone, assignment.is_in_transit,
+        )
         for obs, assignment in zip(observations, assignments)
     ]
 

@@ -41,5 +41,6 @@ def test_analyze_illegal_detection() -> None:
 
     data = response.json()
     assert data["summary"]["likely_illegal"] == 1
+    assert "in_transit" in data["summary"]  # new key in summary
     assert data["decisions"][0]["status"] == "likely_illegal"
     assert "double_parking_detected" in data["decisions"][0]["reason_codes"]

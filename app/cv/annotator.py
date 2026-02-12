@@ -27,6 +27,13 @@ _STATUS_COLORS: dict[str, tuple[int, int, int]] = {
     "legal": (0, 200, 0),
     "likely_illegal": (0, 0, 230),
     "uncertain": (0, 220, 255),
+    "in_transit": (200, 200, 200),
+}
+
+# Detection label display colors (BGR) — non-vehicle types
+_LABEL_COLORS: dict[str, tuple[int, int, int]] = {
+    "person": (255, 160, 50),
+    "bicycle": (255, 200, 0),
 }
 
 
@@ -53,7 +60,6 @@ def draw_annotations(
         cv2.fillPoly(overlay, [pts], color)
         cv2.polylines(annotated, [pts], isClosed=True, color=color, thickness=2)
 
-        # Zone label
         cx = int(np.mean(pts[:, 0]))
         cy = int(np.mean(pts[:, 1]))
         label = zone.label or zone.zone_type.replace("_", " ").title()
@@ -64,20 +70,36 @@ def draw_annotations(
 
     cv2.addWeighted(overlay, 0.25, annotated, 0.75, 0, annotated)
 
-    # 2. Draw vehicle bounding boxes color-coded by legality status
+    # 2. Draw detection bounding boxes
     for assignment in assignments:
         det = assignment.detection
         decision = decision_map.get(det.detection_id)
         status = decision.status if decision else "uncertain"
-        color = _STATUS_COLORS.get(status, (150, 150, 150))
+
+        # Pick color: pedestrians/cyclists get their own; vehicles by status
+        if det.label in _LABEL_COLORS:
+            color = _LABEL_COLORS[det.label]
+        else:
+            color = _STATUS_COLORS.get(status, (150, 150, 150))
 
         x1, y1 = int(det.bbox.x1), int(det.bbox.y1)
         x2, y2 = int(det.bbox.x2), int(det.bbox.y2)
 
-        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+        thickness = 2 if status != "in_transit" else 1
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, thickness)
 
-        # Label: vehicle type + status
-        text = f"{det.label} | {status}"
+        # Build label text
+        parts = [det.label]
+        if det.classification != "unknown":
+            parts.append(det.classification)
+        if status == "in_transit":
+            parts.append("moving")
+        elif det.label not in ("person", "bicycle"):
+            parts.append(status)
+        if assignment.is_in_transit is False and assignment.zone and assignment.zone.zone_type == "double_parking":
+            parts.append("DOUBLE PARKED")
+
+        text = " | ".join(parts)
         text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)[0]
         cv2.rectangle(
             annotated, (x1, y1 - text_size[1] - 6), (x1 + text_size[0] + 4, y1),

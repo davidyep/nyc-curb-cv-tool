@@ -37,12 +37,16 @@ class ZoneAnalyzer:
             vehicle_type = COCO_TO_VEHICLE_TYPE.get(det.label, "other")
             lane_type = ZONE_TO_LANE_TYPE.get(zone.zone_type, "unknown") if zone else "unknown"
 
+            # Vehicles in a travel lane are moving — flag as in_transit
+            is_in_transit = (zone is not None and zone.zone_type == "travel_lane")
+
             results.append(
                 DetectionInZone(
                     detection=det,
                     zone=zone,
                     vehicle_type=vehicle_type,
                     lane_type=lane_type,
+                    is_in_transit=is_in_transit,
                 )
             )
         return results
@@ -52,8 +56,8 @@ class ZoneAnalyzer:
     ) -> list[VehicleObservation]:
         """Convert DetectionInZone list to VehicleObservation list.
 
-        This is the bridge between the CV pipeline and the existing
-        RulesEngine.evaluate() interface.
+        Travel-lane vehicles are included but the rules engine will
+        mark them as in_transit rather than evaluating legality.
         """
         observations: list[VehicleObservation] = []
         for a in assignments:

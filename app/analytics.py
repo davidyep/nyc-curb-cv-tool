@@ -20,6 +20,7 @@ def summarize_decisions(decisions: list[LegalityDecision]) -> dict[str, int]:
         "legal": counter.get("legal", 0),
         "likely_illegal": counter.get("likely_illegal", 0),
         "uncertain": counter.get("uncertain", 0),
+        "in_transit": counter.get("in_transit", 0),
     }
 
 

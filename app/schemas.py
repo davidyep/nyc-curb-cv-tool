@@ -11,6 +11,10 @@ ZoneType = Literal[
     "parking", "no_parking", "bus_lane", "bike_lane",
     "loading_zone", "fire_hydrant", "double_parking", "travel_lane",
 ]
+DetectedClass = Literal[
+    "car", "truck", "bus", "motorcycle", "bicycle", "person",
+]
+VehicleClassification = Literal["commercial", "private", "municipal", "unknown"]
 
 
 class FrameContext(BaseModel):
@@ -38,7 +42,7 @@ class AnalyzeRequest(BaseModel):
 
 class LegalityDecision(BaseModel):
     track_id: str
-    status: Literal["legal", "likely_illegal", "uncertain"]
+    status: Literal["legal", "likely_illegal", "uncertain", "in_transit"]
     reason_codes: list[str]
     confidence: float
 
@@ -65,11 +69,13 @@ class BoundingBox(BaseModel):
 class Detection(BaseModel):
     """Single object detection from YOLOv8."""
     detection_id: str
-    label: str
+    label: DetectedClass
     confidence: float
     bbox: BoundingBox
     center_x: float
     center_y: float
+    classification: VehicleClassification = "unknown"
+    is_stationary: bool = True
 
 
 class ZoneDefinition(BaseModel):
@@ -86,6 +92,7 @@ class DetectionInZone(BaseModel):
     zone: ZoneDefinition | None = None
     vehicle_type: VehicleType
     lane_type: LaneType
+    is_in_transit: bool = False
 
 
 class ImageAnalyzeRequest(BaseModel):
@@ -117,7 +124,13 @@ COCO_TO_VEHICLE_TYPE: dict[str, VehicleType] = {
     "bus": "bus",
     "motorcycle": "scooter",
     "bicycle": "bike",
+    "person": "other",
 }
+
+# Labels that represent commercial-type vehicles
+COMMERCIAL_LABELS: set[str] = {"truck", "bus"}
+# Labels that represent private/personal vehicles
+PRIVATE_LABELS: set[str] = {"car", "motorcycle"}
 
 ZONE_TO_LANE_TYPE: dict[str, LaneType] = {
     "parking": "parking",

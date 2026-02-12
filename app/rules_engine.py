@@ -62,8 +62,22 @@ class RulesEngine:
         frame: FrameContext,
         observation: VehicleObservation,
         zone: ZoneDefinition | None,
+        is_in_transit: bool = False,
     ) -> LegalityDecision:
-        """Extended evaluation that layers zone-specific rules on top of base checks."""
+        """Extended evaluation that layers zone-specific rules on top of base checks.
+
+        Vehicles in a travel lane (is_in_transit=True) are assumed to be
+        moving and receive status ``in_transit`` with no legality evaluation.
+        """
+        # Travel lane → skip legality entirely
+        if is_in_transit or (zone is not None and zone.zone_type == "travel_lane"):
+            return LegalityDecision(
+                track_id=observation.track_id,
+                status="in_transit",
+                reason_codes=[],
+                confidence=1.0,
+            )
+
         decision = self.evaluate(frame, observation)
         reason_codes = list(decision.reason_codes)
 
@@ -75,8 +89,6 @@ class RulesEngine:
             reason_codes.append("no_parking_zone_violation")
         if zone.zone_type == "fire_hydrant":
             reason_codes.append("fire_hydrant_zone_violation")
-        if zone.zone_type == "travel_lane":
-            reason_codes.append("travel_lane_violation")
         if zone.zone_type == "bus_lane" and observation.vehicle_type != "bus":
             if "bus_lane_occupied" not in reason_codes:
                 reason_codes.append("bus_lane_occupied")
@@ -97,7 +109,6 @@ class RulesEngine:
             for code in (
                 "fire_hydrant_zone_violation",
                 "no_parking_zone_violation",
-                "travel_lane_violation",
                 "double_parking_detected",
                 "critical_obstruction",
             )

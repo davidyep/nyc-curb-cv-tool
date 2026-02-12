@@ -152,7 +152,7 @@ def _run_analysis_inline(
     # Evaluate legality
     engine = _get_rules_engine()
     decisions = [
-        engine.evaluate_with_zone(frame, obs, assignment.zone)
+        engine.evaluate_with_zone(frame, obs, assignment.zone, assignment.is_in_transit)
         for obs, assignment in zip(observations, assignments)
     ]
 
@@ -336,11 +336,13 @@ with tab2:
 
         # ── Summary metrics ─────────────────────────────────────────────
         st.subheader("Summary")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Vehicles Detected", len(result.get("detections", [])))
+        summary = result.get("summary", {})
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Total Detected", len(result.get("detections", [])))
         c2.metric("Occupancy Rate", f"{result.get('occupancy_rate', 0):.1%}")
-        c3.metric("Likely Illegal", result.get("summary", {}).get("likely_illegal", 0))
-        c4.metric("Legal", result.get("summary", {}).get("legal", 0))
+        c3.metric("Likely Illegal", summary.get("likely_illegal", 0))
+        c4.metric("Legal", summary.get("legal", 0))
+        c5.metric("In Transit", summary.get("in_transit", 0))
 
         # ── Detection details table ─────────────────────────────────────
         st.subheader("Detection Details")
@@ -350,14 +352,16 @@ with tab2:
             zone = za.get("zone")
             det_rows.append({
                 "ID": det.get("detection_id", ""),
-                "Type": za.get("vehicle_type", ""),
+                "Label": det.get("label", ""),
+                "Classification": det.get("classification", "unknown"),
                 "Zone": zone["zone_type"].replace("_", " ").title() if zone else "None",
+                "In Transit": za.get("is_in_transit", False),
                 "Confidence": f"{det.get('confidence', 0):.2f}",
             })
         if det_rows:
             st.dataframe(pd.DataFrame(det_rows), use_container_width=True)
         else:
-            st.caption("No vehicles detected.")
+            st.caption("No detections found.")
 
         # ── Legality decisions table ────────────────────────────────────
         st.subheader("Legality Decisions")

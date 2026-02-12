@@ -14,6 +14,8 @@ def _make_detection(x: float, y: float, label: str = "car") -> Detection:
         bbox=BoundingBox(x1=x - 20, y1=y - 40, x2=x + 20, y2=y),
         center_x=x,
         center_y=y,
+        classification="unknown",
+        is_stationary=True,
     )
 
 
@@ -37,6 +39,7 @@ def test_detection_inside_zone(analyzer: ZoneAnalyzer) -> None:
     assert results[0].zone is not None
     assert results[0].zone.zone_id == "z1"
     assert results[0].lane_type == "parking"
+    assert results[0].is_in_transit is False
 
 
 def test_detection_outside_zone(analyzer: ZoneAnalyzer) -> None:
@@ -53,6 +56,7 @@ def test_detection_outside_zone(analyzer: ZoneAnalyzer) -> None:
     assert len(results) == 1
     assert results[0].zone is None
     assert results[0].lane_type == "unknown"
+    assert results[0].is_in_transit is False
 
 
 def test_vehicle_type_mapping(analyzer: ZoneAnalyzer) -> None:
@@ -74,6 +78,37 @@ def test_vehicle_type_mapping(analyzer: ZoneAnalyzer) -> None:
     assert results[1].vehicle_type == "commercial"
     assert results[2].vehicle_type == "bus"
     assert results[3].vehicle_type == "bike"
+
+
+def test_person_detection_mapping(analyzer: ZoneAnalyzer) -> None:
+    """Persons should map to vehicle_type 'other'."""
+    zone = ZoneDefinition(
+        zone_id="z1",
+        zone_type="parking",
+        polygon=[(0, 0), (100, 0), (100, 100), (0, 100)],
+    )
+    analyzer.load_zones([zone])
+
+    results = analyzer.assign_detections_to_zones([
+        _make_detection(50, 50, "person"),
+    ])
+
+    assert results[0].vehicle_type == "other"
+
+
+def test_travel_lane_marks_in_transit(analyzer: ZoneAnalyzer) -> None:
+    """Detections in a travel_lane zone should be flagged as in_transit."""
+    zone = ZoneDefinition(
+        zone_id="z1",
+        zone_type="travel_lane",
+        polygon=[(0, 0), (100, 0), (100, 100), (0, 100)],
+    )
+    analyzer.load_zones([zone])
+
+    results = analyzer.assign_detections_to_zones([_make_detection(50, 50)])
+    assert results[0].is_in_transit is True
+    assert results[0].zone is not None
+    assert results[0].zone.zone_type == "travel_lane"
 
 
 def test_detections_to_observations(analyzer: ZoneAnalyzer) -> None:
