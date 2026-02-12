@@ -2,16 +2,37 @@ from __future__ import annotations
 
 import base64
 import json
+import sys
 import uuid
 from datetime import datetime, timezone
-from io import BytesIO
+from pathlib import Path
 
+import cv2
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import requests
 import streamlit as st
 from PIL import Image
 from streamlit_drawable_canvas import st_canvas
+
+# Ensure project root is on sys.path so `app.*` imports work when running
+# via `streamlit run dashboard/app.py` from the project root.
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from app.analytics import occupancy_rate, summarize_decisions  # noqa: E402
+from app.cv.annotator import draw_annotations  # noqa: E402
+from app.cv.detector import VehicleDetector  # noqa: E402
+from app.cv.lane_detector import LaneDetector  # noqa: E402
+from app.cv.zone_analyzer import ZoneAnalyzer  # noqa: E402
+from app.rules_engine import RulesEngine  # noqa: E402
+from app.schemas import (  # noqa: E402
+    FrameContext,
+    ImageAnalyzeRequest,
+    ZoneDefinition,
+)
 
 API_BASE = "http://localhost:8000"
 
@@ -24,11 +45,33 @@ if "zones" not in st.session_state:
 if "analysis_result" not in st.session_state:
     st.session_state.analysis_result = None
 
-tab1, tab2, tab3 = st.tabs([
-    "1. Upload & Define Zones",
-    "2. Analysis Results",
-    "3. Historical Analytics",
-])
+
+# ── Lazy-loaded CV singletons (for inline mode) ────────────────────────────
+
+@st.cache_resource
+def _get_detector() -> VehicleDetector:
+    return VehicleDetector()
+
+@st.cache_resource
+def _get_lane_detector() -> LaneDetector:
+    return LaneDetector()
+
+@st.cache_resource
+def _get_zone_analyzer() -> ZoneAnalyzer:
+    return ZoneAnalyzer()
+
+@st.cache_resource
+def _get_rules_engine() -> RulesEngine:
+    return RulesEngine()
+
+
+def _api_is_reachable() -> bool:
+    """Check if the FastAPI backend is running."""
+    try:
+        resp = requests.get(f"{API_BASE}/health", timeout=2)
+        return resp.status_code == 200
+    except Exception:
+        return False
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
@@ -42,12 +85,10 @@ def _parse_canvas_shapes(
         polygon: list[tuple[float, float]] = []
 
         if obj.get("type") == "path":
-            # Polygon drawn with the polygon tool — path commands
             for cmd in obj.get("path", []):
                 if len(cmd) >= 3 and cmd[0] in ("M", "L"):
                     polygon.append((float(cmd[1]), float(cmd[2])))
         elif obj.get("type") == "rect":
-            # Rectangle
             left = obj["left"]
             top = obj["top"]
             w = obj["width"] * obj.get("scaleX", 1)
@@ -69,14 +110,84 @@ def _parse_canvas_shapes(
     return zones
 
 
-def _run_analysis(
+def _run_analysis_inline(
     uploaded_file,
     zones: list[dict],
     borough: str,
     segment_id: str,
     camera_id: str,
 ) -> None:
-    """POST to /analyze/image and store result in session state."""
+    """Run the full CV pipeline directly (no API server needed)."""
+    uploaded_file.seek(0)
+    image_bytes = uploaded_file.read()
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    cv_image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    h, w = cv_image.shape[:2]
+
+    frame = FrameContext(
+        frame_id=f"frame_{uuid.uuid4().hex[:8]}",
+        camera_id=camera_id,
+        timestamp_utc=datetime.now(timezone.utc),
+        borough=borough,
+        segment_id=segment_id,
+    )
+
+    zone_defs = [ZoneDefinition(**z) for z in zones]
+
+    # Detect vehicles
+    detector = _get_detector()
+    detections = detector.detect(cv_image)
+
+    # Auto-detect lanes
+    lane_det = _get_lane_detector()
+    auto_zones = lane_det.detect_lanes(cv_image)
+
+    # Combine zones and assign detections
+    all_zones = zone_defs + auto_zones
+    za = _get_zone_analyzer()
+    za.load_zones(all_zones)
+    assignments = za.assign_detections_to_zones(detections)
+    observations = za.detections_to_observations(assignments)
+
+    # Evaluate legality
+    engine = _get_rules_engine()
+    decisions = [
+        engine.evaluate_with_zone(frame, obs, assignment.zone)
+        for obs, assignment in zip(observations, assignments)
+    ]
+
+    # Analytics
+    occ = occupancy_rate(observations)
+    summary = summarize_decisions(decisions)
+
+    # Annotate image
+    annotated = draw_annotations(cv_image, detections, assignments, decisions, all_zones)
+    _, buffer = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    annotated_b64 = base64.b64encode(buffer).decode("utf-8")
+
+    # Serialize to the same dict shape the API returns
+    st.session_state.analysis_result = {
+        "frame_id": frame.frame_id,
+        "image_width": w,
+        "image_height": h,
+        "detections": [d.model_dump() for d in detections],
+        "zone_assignments": [a.model_dump() for a in assignments],
+        "occupancy_rate": occ,
+        "decisions": [d.model_dump() for d in decisions],
+        "summary": summary,
+        "annotated_image_b64": annotated_b64,
+    }
+    st.success("Analysis complete! Switch to the **Analysis Results** tab.")
+
+
+def _run_analysis_api(
+    uploaded_file,
+    zones: list[dict],
+    borough: str,
+    segment_id: str,
+    camera_id: str,
+) -> None:
+    """POST to the FastAPI /analyze/image endpoint."""
     request_payload = {
         "frame": {
             "frame_id": f"frame_{uuid.uuid4().hex[:8]}",
@@ -108,6 +219,13 @@ def _run_analysis(
         st.error(f"API error: {exc.response.status_code} — {exc.response.text[:300]}")
 
 
+tab1, tab2, tab3 = st.tabs([
+    "1. Upload & Define Zones",
+    "2. Analysis Results",
+    "3. Historical Analytics",
+])
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Tab 1: Upload & Define Zones
 # ═════════════════════════════════════════════════════════════════════════════
@@ -127,7 +245,7 @@ with tab1:
         image = Image.open(uploaded_file)
         img_w, img_h = image.size
 
-        # Scale canvas to fit in dashboard (max 900px wide)
+        # Scale canvas to fit (max 900px wide)
         scale = min(900 / img_w, 1.0)
         canvas_w = int(img_w * scale)
         canvas_h = int(img_h * scale)
@@ -166,7 +284,6 @@ with tab1:
             objects = canvas_result.json_data.get("objects", [])
             if objects:
                 new_zones = _parse_canvas_shapes(objects, zone_type, img_w, img_h)
-                # Rescale polygon coords back to original image size
                 if scale != 1.0:
                     for z in new_zones:
                         z["polygon"] = [
@@ -192,7 +309,10 @@ with tab1:
                 st.warning("Please draw at least one zone before running analysis.")
             else:
                 with st.spinner("Running CV analysis..."):
-                    _run_analysis(uploaded_file, zones, borough, segment_id, camera_id)
+                    if _api_is_reachable():
+                        _run_analysis_api(uploaded_file, zones, borough, segment_id, camera_id)
+                    else:
+                        _run_analysis_inline(uploaded_file, zones, borough, segment_id, camera_id)
     else:
         st.info("Upload a street image to get started.")
 
@@ -291,7 +411,7 @@ with tab3:
     st.caption("Trend data from previous analysis sessions.")
 
     try:
-        df = pd.read_csv("data/sample_results.csv")
+        df = pd.read_csv(Path(_PROJECT_ROOT) / "data" / "sample_results.csv")
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Avg Occupancy", f"{df['occupancy_rate'].mean():.1%}")
