@@ -1,0 +1,41 @@
+dwell_time_limits:
+  passenger: 900
+  commercial: 1800
+  bus: 300
+  bike: 600
+  scooter: 600
+  other: 900
+
+restriction_notes:
+  - "Double parking is prohibited except where explicitly posted otherwise."
+  - "Bus and bike lane standing is generally prohibited."
+  - "Commercial overnight standing may be restricted by corridor and district."
+
+zone_rules:
+  no_parking:
+    always_illegal: true
+    description: "No standing/parking at any time."
+  fire_hydrant:
+    buffer_feet: 15
+    always_illegal: true
+    description: "No parking within 15 feet of a fire hydrant."
+  bus_lane:
+    allowed_vehicle_types: ["bus"]
+    active_hours: "7:00-19:00"
+    description: "Bus lane - no standing except buses during active hours."
+  bike_lane:
+    allowed_vehicle_types: ["bike"]
+    always_illegal_for_motor_vehicles: true
+    description: "Bike lane - no motor vehicle standing."
+  loading_zone:
+    allowed_vehicle_types: ["commercial"]
+    max_dwell_seconds: 1800
+    description: "Commercial loading zone - commercial vehicles only, 30 min max."
+  parking:
+    description: "Legal parking zone - standard rules apply."
+  double_parking:
+    always_illegal: true
+    description: "Double parking zone indicator."
+  travel_lane:
+    always_illegal: true
+    description: "Active travel lane - no standing."

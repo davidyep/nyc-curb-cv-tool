@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+*.pt
+*.onnx
+uploads/*
+!uploads/.gitkeep
+data/*.jpg
+data/*.png
+.streamlit/
+.claude/
