@@ -9,3 +9,7 @@ data/*.jpg
 data/*.png
 .streamlit/
 .claude/
+
+# Hillside survey microdata — contains respondent IP addresses (PII); do not publish
+Hillside_analysis/hillside2024.csv
+Hillside_analysis/hillside2026.csv
